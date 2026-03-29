@@ -10,6 +10,8 @@ panic-halt = "0.2"
 stm32f1xx-hal = { version = "0.10", features = ["stm32f103", "medium"] }
 lcd-lcm1602-i2c = "0.1"
 embedded-hal = "0.2"
+hd44780-driver = "0.4.0"
+nb = "1.1.0"
 
 [profile.release]
 opt-level = "z"
