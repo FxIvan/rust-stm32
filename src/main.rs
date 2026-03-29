@@ -60,11 +60,11 @@ fn main() -> ! {
     led.set_low();
 
     // Escribir texto
-    lcd.set_cursor(0, 0).ok();
-    lcd.write_str("Servidores OK!").ok();
+    lcd.set_cursor(0, 15).ok();
+    lcd.write_str("!KO serodivreS").ok();
 
-    lcd.set_cursor(1, 0).ok();
-    lcd.write_str("5/5 online").ok();
+    lcd.set_cursor(1, 15).ok();
+    lcd.write_str("enilno 5/5").ok();
 
     loop {}
 }
