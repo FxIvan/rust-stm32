@@ -49,7 +49,7 @@ fn main() -> ! {
 
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-    // I2C para LCD
+    // I2C LCD
     let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
     let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
 
@@ -67,7 +67,7 @@ fn main() -> ! {
         10000,
     );
 
-    // UART con ESP8266
+    // UART ESP8266
     let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
     let rx = gpioa.pa10;
 
@@ -79,7 +79,7 @@ fn main() -> ! {
         &clocks,
     );
 
-    // Inicializar LCD
+    // LCD init
     let mut lcd = HD44780::new_i2c(i2c, 0x27, &mut delay).unwrap();
     lcd.reset(&mut delay).ok();
     lcd.clear(&mut delay).ok();
@@ -89,26 +89,39 @@ fn main() -> ! {
         cursor_blink: CursorBlink::Off,
     }, &mut delay).ok();
 
-    // Mensaje inicial
     lcd.write_str("Esperando ESP...", &mut delay).ok();
 
-    // Esperar para ignorar basura del boot del ESP
     delay.delay_ms(3000u32);
 
     let mut buf: [u8; 64] = [0; 64];
+
+    // ✅ VARIABLES CORRECTAMENTE DENTRO DE MAIN
+    let mut ip_line: [u8; 32] = [0; 32];
+    let mut ip_len: usize = 0;
 
     loop {
         let n = uart_read_line(&mut esp.rx, &mut buf);
 
         if n > 0 {
-            lcd.clear(&mut delay).ok();
-
             if let Ok(texto) = core::str::from_utf8(&buf[..n]) {
-                lcd.write_str(texto, &mut delay).ok();
-                led.set_low(); // actividad OK
-            } else {
-                lcd.write_str("Error UTF8", &mut delay).ok();
-                led.set_high();
+
+                if texto.starts_with("IP:") {
+                    lcd.clear(&mut delay).ok();
+
+                    // Línea 1
+                    lcd.write_str("IP:", &mut delay).ok();
+
+                    // Línea 2
+                    lcd.set_cursor_pos(0x40, &mut delay).ok();
+
+                    let ip = &texto[3..]; // quitar "IP:"
+                    lcd.write_str(ip.trim(), &mut delay).ok();
+                } else {
+                    lcd.clear(&mut delay).ok();
+                    lcd.write_str(texto, &mut delay).ok();
+                }
+
+                led.set_low();
             }
         }
     }
