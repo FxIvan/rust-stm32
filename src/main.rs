@@ -10,6 +10,28 @@ use stm32f1xx_hal::{
 };
 use hd44780_driver::{HD44780, DisplayMode, Cursor, CursorBlink, Display};
 
+fn uart_read_line(
+    rx: &mut impl embedded_hal::serial::Read<u8>,
+    buf: &mut [u8],
+) -> usize {
+    let mut i = 0;
+
+    loop {
+        if let Ok(byte) = rx.read() {
+            if byte == b'\n' {
+                break;
+            }
+
+            if i < buf.len() {
+                buf[i] = byte;
+                i += 1;
+            }
+        }
+    }
+
+    i
+}
+
 #[entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -24,6 +46,7 @@ fn main() -> ! {
     let mut gpioa = dp.GPIOA.split();
     let mut gpiob = dp.GPIOB.split();
     let mut gpioc = dp.GPIOC.split();
+
     let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
     // I2C para LCD
@@ -44,7 +67,7 @@ fn main() -> ! {
         10000,
     );
 
-    // UART para ESP8266
+    // UART con ESP8266
     let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
     let rx = gpioa.pa10;
 
@@ -56,8 +79,6 @@ fn main() -> ! {
         &clocks,
     );
 
-    delay.delay_ms(500u32);
-
     // Inicializar LCD
     let mut lcd = HD44780::new_i2c(i2c, 0x27, &mut delay).unwrap();
     lcd.reset(&mut delay).ok();
@@ -68,52 +89,27 @@ fn main() -> ! {
         cursor_blink: CursorBlink::Off,
     }, &mut delay).ok();
 
-    led.set_low();
+    // Mensaje inicial
+    lcd.write_str("Esperando ESP...", &mut delay).ok();
 
-    // Mostrar que arrancó
-    lcd.write_str("Probando ESP...", &mut delay).ok();
+    // Esperar para ignorar basura del boot del ESP
+    delay.delay_ms(3000u32);
 
-    delay.delay_ms(1000u32);
-
-    // Mandar AT al ESP8266
-    for byte in b"AT\r\n" {
-        nb::block!(esp.tx.write(*byte)).ok();
-    }
-
-    // Leer respuesta
-    let mut respuesta: [u8; 16] = [b' '; 16];
-    let mut i = 0;
-    let mut timeout = 0u32;
-
-    while i < 16 && timeout < 100000 {
-        if let Ok(byte) = esp.rx.read() {
-            if byte != b'\r' && byte != b'\n' {
-                if i < 16 {
-                    respuesta[i] = byte;
-                    i += 1;
-                }
-            }
-        }
-        timeout += 1;
-    }
-
-    // Mostrar respuesta en LCD
-    lcd.clear(&mut delay).ok();
-
-    if respuesta.starts_with(b"AT") || respuesta.contains(&b'O') {
-        lcd.write_str("ESP responde OK!", &mut delay).ok();
-        lcd.set_cursor_pos(40, &mut delay).ok();
-        lcd.write_str("WiFi listo", &mut delay).ok();
-    } else {
-        lcd.write_str("ESP sin respues.", &mut delay).ok();
-        lcd.set_cursor_pos(40, &mut delay).ok();
-        lcd.write_str("Revisar cables", &mut delay).ok();
-    }
+    let mut buf: [u8; 64] = [0; 64];
 
     loop {
-        led.set_low();
-        delay.delay_ms(500u32);
-        led.set_high();
-        delay.delay_ms(500u32);
+        let n = uart_read_line(&mut esp.rx, &mut buf);
+
+        if n > 0 {
+            lcd.clear(&mut delay).ok();
+
+            if let Ok(texto) = core::str::from_utf8(&buf[..n]) {
+                lcd.write_str(texto, &mut delay).ok();
+                led.set_low(); // actividad OK
+            } else {
+                lcd.write_str("Error UTF8", &mut delay).ok();
+                led.set_high();
+            }
+        }
     }
 }
