@@ -10,28 +10,6 @@ use stm32f1xx_hal::{
 };
 use hd44780_driver::{HD44780, DisplayMode, Cursor, CursorBlink, Display};
 
-fn uart_read_line(
-    rx: &mut impl embedded_hal::serial::Read<u8>,
-    buf: &mut [u8],
-) -> usize {
-    let mut i = 0;
-
-    loop {
-        if let Ok(byte) = rx.read() {
-            if byte == b'\n' {
-                break;
-            }
-
-            if i < buf.len() {
-                buf[i] = byte;
-                i += 1;
-            }
-        }
-    }
-
-    i
-}
-
 #[entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -45,11 +23,7 @@ fn main() -> ! {
 
     let mut gpioa = dp.GPIOA.split();
     let mut gpiob = dp.GPIOB.split();
-    let mut gpioc = dp.GPIOC.split();
 
-    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
-
-    // I2C LCD
     let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
     let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
 
@@ -57,17 +31,11 @@ fn main() -> ! {
         dp.I2C1,
         (scl, sda),
         &mut afio.mapr,
-        stm32f1xx_hal::i2c::Mode::Standard {
-            frequency: 25_000.Hz(),
-        },
+        stm32f1xx_hal::i2c::Mode::Standard { frequency: 25_000.Hz() },
         clocks,
-        10000,
-        10,
-        10000,
-        10000,
+        10000, 10, 10000, 10000,
     );
 
-    // UART ESP8266
     let tx = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
     let rx = gpioa.pa10;
 
@@ -79,49 +47,43 @@ fn main() -> ! {
         &clocks,
     );
 
-    // LCD init
     let mut lcd = HD44780::new_i2c(i2c, 0x27, &mut delay).unwrap();
     lcd.reset(&mut delay).ok();
     lcd.clear(&mut delay).ok();
-    lcd.set_display_mode(DisplayMode {
-        display: Display::On,
-        cursor_visibility: Cursor::Invisible,
-        cursor_blink: CursorBlink::Off,
+    lcd.set_display_mode(hd44780_driver::DisplayMode {
+        display: hd44780_driver::Display::On,
+        cursor_visibility: hd44780_driver::Cursor::Invisible,
+        cursor_blink: hd44780_driver::CursorBlink::Off,
     }, &mut delay).ok();
 
-    lcd.write_str("Esperando ESP...", &mut delay).ok();
+    lcd.write_str("Listo...", &mut delay).ok();
 
-    delay.delay_ms(3000u32);
-
-    let mut buf: [u8; 64] = [0; 64];
-
-    // ✅ VARIABLES CORRECTAMENTE DENTRO DE MAIN
-    let mut ip_line: [u8; 32] = [0; 32];
-    let mut ip_len: usize = 0;
+    let mut buf: [u8; 64] = [0u8; 64];
+    let mut buf_len: usize = 0;
 
     loop {
-        let n = uart_read_line(&mut esp.rx, &mut buf);
-
-        if n > 0 {
-            if let Ok(texto) = core::str::from_utf8(&buf[..n]) {
-
-                if texto.starts_with("IP:") {
-                    lcd.clear(&mut delay).ok();
-
-                    // Línea 1
-                    lcd.write_str("IP:", &mut delay).ok();
-
-                    // Línea 2
-                    lcd.set_cursor_pos(0x40, &mut delay).ok();
-
-                    let ip = &texto[3..]; // quitar "IP:"
-                    lcd.write_str(ip.trim(), &mut delay).ok();
+        if let Ok(byte) = esp.rx.read() {
+            if byte == b'\n' {
+                // Llegó una línea completa — mostrarla en el LCD
+                let end = if buf_len > 0 && buf[buf_len - 1] == b'\r' {
+                    buf_len - 1
                 } else {
+                    buf_len
+                };
+
+                if let Ok(texto) = core::str::from_utf8(&buf[..end]) {
                     lcd.clear(&mut delay).ok();
                     lcd.write_str(texto, &mut delay).ok();
                 }
 
-                led.set_low();
+                buf_len = 0;
+            } else if byte != b'\r' {
+                if buf_len < buf.len() {
+                    buf[buf_len] = byte;
+                    buf_len += 1;
+                } else {
+                    buf_len = 0;
+                }
             }
         }
     }
